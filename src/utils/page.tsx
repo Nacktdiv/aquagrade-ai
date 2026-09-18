@@ -14,6 +14,26 @@ export default function AnalysisPage() {
   const [error, setError] = useState<string | null>(null);
   const [cameraReady, setCameraReady] = useState<boolean>(false);
 
+  // Fungsi MOCK untuk simulasi deteksi YOLOv8
+  const mockAnalyzeFish = async (imageSrc: string): Promise<FishDetection> => {
+    return new Promise((resolve, reject) => {
+      setTimeout(() => {
+        if (Math.random() > 0.9) {
+          reject(new Error("Objek ikan tidak terdeteksi dengan jelas."));
+          return;
+        }
+        
+        const isFresh = Math.random() > 0.4;
+        resolve({
+          status: isFresh ? 'segar' : 'busuk',
+          estimated_weight: Math.floor(Math.random() * (1500 - 300 + 1) + 300),
+          estimated_volume: Math.floor(Math.random() * (1000 - 200 + 1) + 200),
+          confidence_score: parseFloat((Math.random() * (0.99 - 0.75) + 0.75).toFixed(2))
+        });
+      }, 2000);
+    });
+  };
+
   const captureAndAnalyze = useCallback(async () => {
     if (!webcamRef.current) return;
     
@@ -21,7 +41,6 @@ export default function AnalysisPage() {
     setError(null);
     setResult(null);
 
-    // Dapatkan gambar format base64
     const imageSrc = webcamRef.current.getScreenshot();
     
     if (!imageSrc) {
@@ -31,23 +50,9 @@ export default function AnalysisPage() {
     }
 
     try {
-      // 1. Kirim gambar ke Route Handler (Gemini API)
-      const response = await fetch('/api/analyze', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ imageBase64: imageSrc })
-      });
-
-      if (!response.ok) {
-        const errData = await response.json();
-        throw new Error(errData.error || "Gagal memproses gambar");
-      }
-
-      // 2. Data JSON dari Gemini sudah persis sesuai dengan tabel database
-      const detectionResult: FishDetection = await response.json();
+      const detectionResult = await mockAnalyzeFish(imageSrc);
       setResult(detectionResult);
 
-      // 3. Push data ke Supabase Firebase (Langsung dikonsumsi)
       const { error: dbError } = await supabase
         .from('fish_detections')
         .insert([
@@ -61,11 +66,11 @@ export default function AnalysisPage() {
 
       if (dbError) {
         console.error("Supabase insert error:", dbError);
-        setError("Berhasil dideteksi oleh Gemini, tetapi gagal menyimpan ke Supabase.");
+        setError("Hasil berhasil dideteksi, tetapi gagal menyimpan ke database.");
       }
 
     } catch (err: any) {
-      setError(err.message || "Terjadi kesalahan sistem saat menganalisis.");
+      setError(err.message || "Terjadi kesalahan saat menganalisis.");
     } finally {
       setIsAnalyzing(false);
     }
@@ -74,8 +79,8 @@ export default function AnalysisPage() {
   return (
     <div className="max-w-4xl mx-auto flex flex-col items-center">
       <div className="text-center mb-8">
-        <h1 className="text-3xl font-bold mb-2 font-serif">Analisis Kualitas Ikan (Gemini AI)</h1>
-        <p className="text-gray-600">Arahkan kamera ke ikan dan tekan Analyze untuk mendeteksi kesegaran.</p>
+        <h1 className="text-3xl font-bold mb-2 font-serif">Analisis Kualitas Ikan</h1>
+        <p className="text-gray-600">Arahkan kamera ke ikan dan tekan Analyze untuk memulai.</p>
       </div>
 
       <div className="w-full bg-black rounded-lg overflow-hidden shadow-xl mb-6 relative aspect-video flex items-center justify-center">
@@ -95,11 +100,11 @@ export default function AnalysisPage() {
         />
         
         {isAnalyzing && (
-          <div className="absolute inset-0 bg-black/50 flex flex-col items-center justify-center z-20">
-            <Loader2 size={48} className="animate-spin text-orange-500 mb-4" />
-            <p className="text-orange-500 font-semibold tracking-wider bg-black/50 px-4 py-2 rounded-full border border-orange-500/30">
-              MEMPROSES MODEL GEMMA-4-31B...
-            </p>
+          <div className="absolute inset-0 bg-black/50 flex items-center justify-center z-20">
+            <div className="flex flex-col items-center text-orange-500">
+              <Loader2 size={48} className="animate-spin mb-2" />
+              <p className="font-semibold tracking-wider">MENGANALISIS...</p>
+            </div>
           </div>
         )}
       </div>
@@ -113,44 +118,38 @@ export default function AnalysisPage() {
             : 'bg-orange-500 hover:bg-orange-600 text-white'
         }`}
       >
-        {isAnalyzing ? 'Menunggu Output AI...' : 'Analyze Object'}
+        {isAnalyzing ? 'Memproses...' : 'Analyze Object'}
       </button>
 
-      {/* Bagian Error */}
       {error && (
-        <div className="w-full mt-8 bg-red-50 border-l-4 border-red-500 p-4 rounded-md flex items-start shadow-sm">
-          <AlertCircle className="text-red-500 mr-3 mt-0.5 flex-shrink-0" />
+        <div className="w-full mt-8 bg-red-50 border-l-4 border-red-500 p-4 rounded-md flex items-start">
+          <AlertCircle className="text-red-500 mr-3 mt-0.5" />
           <div>
-            <h3 className="text-red-800 font-bold">Terjadi Kesalahan</h3>
+            <h3 className="text-red-800 font-bold">Error Deteksi</h3>
             <p className="text-red-700 text-sm mt-1">{error}</p>
           </div>
         </div>
       )}
 
-      {/* Bagian Hasil */}
       {result && !error && (
-        <div className="w-full mt-8 bg-white border border-gray-200 shadow-lg rounded-xl overflow-hidden animate-in fade-in slide-in-from-bottom-4 duration-500">
+        <div className="w-full mt-8 bg-white border border-gray-200 shadow-lg rounded-xl overflow-hidden">
           <div className={`p-4 text-white flex items-center justify-between ${result.status === 'segar' ? 'bg-green-600' : 'bg-red-600'}`}>
             <div className="flex items-center">
               <CheckCircle className="mr-2" />
-              <h3 className="font-bold text-xl uppercase">Hasil AI: Ikan {result.status}</h3>
+              <h3 className="font-bold text-xl uppercase">Hasil: Ikan {result.status}</h3>
             </div>
-            <span className="bg-black/20 px-3 py-1 rounded-full text-sm font-mono flex items-center">
-              Conf: {(result.confidence_score * 100).toFixed(0)}%
+            <span className="bg-black/20 px-3 py-1 rounded-full text-sm font-mono">
+              Confidence: {result.confidence_score}
             </span>
           </div>
           <div className="p-6 grid grid-cols-2 gap-4">
-            <div className="bg-orange-50/50 p-4 rounded-lg text-center border border-orange-100">
+            <div className="bg-gray-50 p-4 rounded-lg text-center border border-gray-100">
               <p className="text-sm text-gray-500 mb-1 uppercase tracking-wide">Estimasi Berat</p>
-              <p className="text-2xl font-bold text-gray-900">
-                {result.estimated_weight} <span className="text-base font-normal text-gray-500">gram</span>
-              </p>
+              <p className="text-2xl font-bold text-gray-900">{result.estimated_weight} <span className="text-base font-normal">gram</span></p>
             </div>
-            <div className="bg-orange-50/50 p-4 rounded-lg text-center border border-orange-100">
+            <div className="bg-gray-50 p-4 rounded-lg text-center border border-gray-100">
               <p className="text-sm text-gray-500 mb-1 uppercase tracking-wide">Estimasi Volume</p>
-              <p className="text-2xl font-bold text-gray-900">
-                {result.estimated_volume} <span className="text-base font-normal text-gray-500">cm&sup3;</span>
-              </p>
+              <p className="text-2xl font-bold text-gray-900">{result.estimated_volume} <span className="text-base font-normal">cm&sup3;</span></p>
             </div>
           </div>
         </div>
