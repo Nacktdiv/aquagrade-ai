@@ -4,6 +4,7 @@ export interface FishDetection {
   id?: string;
   created_at?: string;
   status: 'segar' | 'busuk';
+  fish_type: string;
   estimated_weight: number;
   estimated_volume: number;
   confidence_score: number;

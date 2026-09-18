@@ -1,159 +1,196 @@
-// src/app/page.tsx
+// src/app/dashboard/page.tsx
 'use client';
 
-import { useState, useRef, useCallback } from 'react';
-import Webcam from 'react-webcam';
+import { useEffect, useState } from 'react';
 import { supabase } from '@/lib/supabaseClient';
-import { Camera, AlertCircle, CheckCircle, Loader2 } from 'lucide-react';
-import { FishDetection } from '@/types/database.types';
+import { BarChart3, Scale, Box, CheckSquare, XSquare, Loader2 } from 'lucide-react';
+import { FishDetection, DashboardStats } from '@/types/database.types';
 
-export default function AnalysisPage() {
-  const webcamRef = useRef<Webcam>(null);
-  const [isAnalyzing, setIsAnalyzing] = useState<boolean>(false);
-  const [result, setResult] = useState<FishDetection | null>(null);
-  const [error, setError] = useState<string | null>(null);
-  const [cameraReady, setCameraReady] = useState<boolean>(false);
+// Tipe Props untuk Komponen Card
+interface StatCardProps {
+  icon: React.ReactNode;
+  title: string;
+  value: string | number;
+  color: string;
+}
 
-  // Fungsi MOCK untuk simulasi deteksi YOLOv8
-  const mockAnalyzeFish = async (imageSrc: string): Promise<FishDetection> => {
-    return new Promise((resolve, reject) => {
-      setTimeout(() => {
-        if (Math.random() > 0.9) {
-          reject(new Error("Objek ikan tidak terdeteksi dengan jelas."));
-          return;
-        }
-        
-        const isFresh = Math.random() > 0.4;
-        resolve({
-          status: isFresh ? 'segar' : 'busuk',
-          estimated_weight: Math.floor(Math.random() * (1500 - 300 + 1) + 300),
-          estimated_volume: Math.floor(Math.random() * (1000 - 200 + 1) + 200),
-          confidence_score: parseFloat((Math.random() * (0.99 - 0.75) + 0.75).toFixed(2))
-        });
-      }, 2000);
+export default function DashboardPage() {
+  const [data, setData] = useState<FishDetection[]>([]);
+  const [loading, setLoading] = useState<boolean>(true);
+  const [stats, setStats] = useState<DashboardStats>({
+    totalFresh: 0,
+    totalRotten: 0,
+    avgWeight: '0',
+    avgVolume: '0'
+  });
+  
+  const [selectedId, setSelectedId] = useState<string | null>(null);
+
+  useEffect(() => {
+    fetchData();
+  }, []);
+
+  const fetchData = async () => {
+    setLoading(true);
+    const { data: detections, error } = await supabase
+      .from('fish_detections')
+      .select('*')
+      .order('created_at', { ascending: false });
+
+    if (error) {
+      console.error("Error fetching data:", error);
+    } else if (detections) {
+      // Cast data ke array FishDetection
+      const typedDetections = detections as FishDetection[];
+      setData(typedDetections);
+      calculateStats(typedDetections);
+    }
+    setLoading(false);
+  };
+
+  const calculateStats = (detections: FishDetection[]) => {
+    if (detections.length === 0) return;
+
+    let fresh = 0;
+    let rotten = 0;
+    let totalW = 0;
+    let totalV = 0;
+
+    detections.forEach(d => {
+      if (d.status === 'segar') fresh++;
+      if (d.status === 'busuk') rotten++;
+      totalW += Number(d.estimated_weight);
+      totalV += Number(d.estimated_volume);
+    });
+
+    setStats({
+      totalFresh: fresh,
+      totalRotten: rotten,
+      avgWeight: (totalW / detections.length).toFixed(1),
+      avgVolume: (totalV / detections.length).toFixed(1)
     });
   };
 
-  const captureAndAnalyze = useCallback(async () => {
-    if (!webcamRef.current) return;
-    
-    setIsAnalyzing(true);
-    setError(null);
-    setResult(null);
-
-    const imageSrc = webcamRef.current.getScreenshot();
-    
-    if (!imageSrc) {
-      setError("Gagal mengambil gambar dari kamera.");
-      setIsAnalyzing(false);
-      return;
-    }
-
-    try {
-      const detectionResult = await mockAnalyzeFish(imageSrc);
-      setResult(detectionResult);
-
-      const { error: dbError } = await supabase
-        .from('fish_detections')
-        .insert([
-          { 
-            status: detectionResult.status,
-            estimated_weight: detectionResult.estimated_weight,
-            estimated_volume: detectionResult.estimated_volume,
-            confidence_score: detectionResult.confidence_score
-          }
-        ]);
-
-      if (dbError) {
-        console.error("Supabase insert error:", dbError);
-        setError("Hasil berhasil dideteksi, tetapi gagal menyimpan ke database.");
-      }
-
-    } catch (err: any) {
-      setError(err.message || "Terjadi kesalahan saat menganalisis.");
-    } finally {
-      setIsAnalyzing(false);
-    }
-  }, [webcamRef]);
+  if (loading) {
+    return (
+      <div className="flex flex-col items-center justify-center min-h-[50vh] text-orange-500">
+        <Loader2 size={48} className="animate-spin mb-4" />
+        <p className="text-lg font-medium">Memuat Data Dashboard...</p>
+      </div>
+    );
+  }
 
   return (
-    <div className="max-w-4xl mx-auto flex flex-col items-center">
-      <div className="text-center mb-8">
-        <h1 className="text-3xl font-bold mb-2 font-serif">Analisis Kualitas Ikan</h1>
-        <p className="text-gray-600">Arahkan kamera ke ikan dan tekan Analyze untuk memulai.</p>
+    <div className="max-w-6xl mx-auto">
+      <div className="flex justify-between items-end mb-8">
+        <div>
+          <h1 className="text-3xl font-bold mb-2 font-serif">Dashboard Statistik</h1>
+          <p className="text-gray-600">Ringkasan hasil deteksi sistem AquaGrade AI.</p>
+        </div>
+        <button onClick={fetchData} className="text-sm bg-gray-100 hover:bg-gray-200 px-4 py-2 rounded-md font-medium transition-colors">
+          Refresh Data
+        </button>
       </div>
 
-      <div className="w-full bg-black rounded-lg overflow-hidden shadow-xl mb-6 relative aspect-video flex items-center justify-center">
-        {!cameraReady && (
-          <div className="absolute inset-0 flex flex-col items-center justify-center text-white z-10 bg-gray-900">
-             <Camera size={48} className="mb-4 text-gray-500 animate-pulse" />
-             <p>Memuat kamera...</p>
-          </div>
-        )}
-        <Webcam
-          audio={false}
-          ref={webcamRef}
-          screenshotFormat="image/jpeg"
-          videoConstraints={{ facingMode: "environment" }}
-          onUserMedia={() => setCameraReady(true)}
-          className="w-full h-full object-cover"
+      {/* Kartu Statistik */}
+      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6 mb-10">
+        <StatCard 
+          icon={<CheckSquare className="text-green-500" size={32} />}
+          title="Ikan Segar"
+          value={stats.totalFresh}
+          color="border-green-500"
         />
+        <StatCard 
+          icon={<XSquare className="text-red-500" size={32} />}
+          title="Ikan Busuk"
+          value={stats.totalRotten}
+          color="border-red-500"
+        />
+        <StatCard 
+          icon={<Scale className="text-orange-500" size={32} />}
+          title="Rata-rata Berat"
+          value={`${stats.avgWeight} g`}
+          color="border-orange-500"
+        />
+        <StatCard 
+          icon={<Box className="text-blue-500" size={32} />}
+          title="Rata-rata Volume"
+          value={`${stats.avgVolume} cm³`}
+          color="border-blue-500"
+        />
+      </div>
+
+      {/* Tabel Data */}
+      <div className="bg-white border border-gray-200 shadow-sm rounded-xl overflow-hidden">
+        <div className="bg-black text-white p-4 flex items-center">
+          <BarChart3 className="mr-2 text-orange-500" />
+          <h2 className="font-bold text-lg">Histori Deteksi</h2>
+        </div>
         
-        {isAnalyzing && (
-          <div className="absolute inset-0 bg-black/50 flex items-center justify-center z-20">
-            <div className="flex flex-col items-center text-orange-500">
-              <Loader2 size={48} className="animate-spin mb-2" />
-              <p className="font-semibold tracking-wider">MENGANALISIS...</p>
-            </div>
+        {data.length === 0 ? (
+          <div className="p-8 text-center text-gray-500">Belum ada data deteksi.</div>
+        ) : (
+          <div className="divide-y divide-gray-100">
+            {data.map((item) => (
+              <div key={item.id} className="w-full">
+                <button 
+                  onClick={() => setSelectedId(selectedId === item.id ? null : (item.id || null))}
+                  className="w-full px-6 py-4 flex items-center justify-between hover:bg-orange-50 transition-colors text-left"
+                >
+                  <div className="flex items-center space-x-4">
+                    <span className={`w-3 h-3 rounded-full ${item.status === 'segar' ? 'bg-green-500' : 'bg-red-500'}`}></span>
+                    <span className="font-mono text-sm text-gray-500">
+                      {item.created_at ? new Date(item.created_at).toLocaleString('id-ID') : '-'}
+                    </span>
+                  </div>
+                  <div className="flex items-center space-x-6">
+                    <span className="font-medium capitalize">{item.status}</span>
+                    <span className="text-gray-400 text-sm">{selectedId === item.id ? '▼' : '▶'}</span>
+                  </div>
+                </button>
+
+                {selectedId === item.id && (
+                  <div className="px-6 pb-4 pt-2 bg-gray-50 border-t border-gray-100">
+                    <div className="grid grid-cols-2 md:grid-cols-4 gap-4 text-sm">
+                      <div>
+                        <p className="text-gray-500 mb-1">ID Deteksi</p>
+                        <p className="font-mono text-xs truncate" title={item.id}>{item.id ? item.id.split('-')[0] + '...' : '-'}</p>
+                      </div>
+                      <div>
+                        <p className="text-gray-500 mb-1">Estimasi Berat</p>
+                        <p className="font-semibold">{item.estimated_weight} g</p>
+                      </div>
+                      <div>
+                        <p className="text-gray-500 mb-1">Estimasi Volume</p>
+                        <p className="font-semibold">{item.estimated_volume} cm³</p>
+                      </div>
+                      <div>
+                        <p className="text-gray-500 mb-1">Confidence Model</p>
+                        <p className="font-semibold">{(item.confidence_score * 100).toFixed(1)}%</p>
+                      </div>
+                    </div>
+                  </div>
+                )}
+              </div>
+            ))}
           </div>
         )}
       </div>
+    </div>
+  );
+}
 
-      <button
-        onClick={captureAndAnalyze}
-        disabled={isAnalyzing || !cameraReady}
-        className={`w-full md:w-auto px-8 py-4 rounded-full font-bold text-lg shadow-lg transition-all transform hover:scale-105 ${
-          isAnalyzing || !cameraReady 
-            ? 'bg-gray-400 text-gray-200 cursor-not-allowed' 
-            : 'bg-orange-500 hover:bg-orange-600 text-white'
-        }`}
-      >
-        {isAnalyzing ? 'Memproses...' : 'Analyze Object'}
-      </button>
-
-      {error && (
-        <div className="w-full mt-8 bg-red-50 border-l-4 border-red-500 p-4 rounded-md flex items-start">
-          <AlertCircle className="text-red-500 mr-3 mt-0.5" />
-          <div>
-            <h3 className="text-red-800 font-bold">Error Deteksi</h3>
-            <p className="text-red-700 text-sm mt-1">{error}</p>
-          </div>
-        </div>
-      )}
-
-      {result && !error && (
-        <div className="w-full mt-8 bg-white border border-gray-200 shadow-lg rounded-xl overflow-hidden">
-          <div className={`p-4 text-white flex items-center justify-between ${result.status === 'segar' ? 'bg-green-600' : 'bg-red-600'}`}>
-            <div className="flex items-center">
-              <CheckCircle className="mr-2" />
-              <h3 className="font-bold text-xl uppercase">Hasil: Ikan {result.status}</h3>
-            </div>
-            <span className="bg-black/20 px-3 py-1 rounded-full text-sm font-mono">
-              Confidence: {result.confidence_score}
-            </span>
-          </div>
-          <div className="p-6 grid grid-cols-2 gap-4">
-            <div className="bg-gray-50 p-4 rounded-lg text-center border border-gray-100">
-              <p className="text-sm text-gray-500 mb-1 uppercase tracking-wide">Estimasi Berat</p>
-              <p className="text-2xl font-bold text-gray-900">{result.estimated_weight} <span className="text-base font-normal">gram</span></p>
-            </div>
-            <div className="bg-gray-50 p-4 rounded-lg text-center border border-gray-100">
-              <p className="text-sm text-gray-500 mb-1 uppercase tracking-wide">Estimasi Volume</p>
-              <p className="text-2xl font-bold text-gray-900">{result.estimated_volume} <span className="text-base font-normal">cm&sup3;</span></p>
-            </div>
-          </div>
-        </div>
-      )}
+// Komponen Card yang menggunakan Props TypeScript
+function StatCard({ icon, title, value, color }: StatCardProps) {
+  return (
+    <div className={`bg-white p-6 rounded-xl shadow-sm border-b-4 ${color} flex items-center justify-between`}>
+      <div>
+        <p className="text-gray-500 text-sm font-medium mb-1">{title}</p>
+        <p className="text-3xl font-bold text-gray-900">{value}</p>
+      </div>
+      <div className="bg-gray-50 p-3 rounded-lg">
+        {icon}
+      </div>
     </div>
   );
 }
